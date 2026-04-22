@@ -11,6 +11,8 @@ class AppState: ObservableObject {
 struct ContentView: View {
     @StateObject private var state = AppState()
     @State private var showFilePicker = false
+    @State private var showModelPicker = false
+    @State private var bundledModels: [(name: String, path: String)] = []
 
     var body: some View {
         ZStack {
@@ -26,9 +28,20 @@ struct ContentView: View {
                         .background(.black.opacity(0.6))
                         .clipShape(Capsule())
                     Spacer()
-                    Button(action: {
+
+                    Button {
+                        showModelPicker = true
+                    } label: {
+                        Image(systemName: "cube")
+                            .font(.title2)
+                            .padding(12)
+                            .background(.ultraThinMaterial)
+                            .clipShape(Circle())
+                    }
+
+                    Button {
                         showFilePicker = true
-                    }) {
+                    } label: {
                         Image(systemName: "folder.badge.plus")
                             .font(.title2)
                             .padding(12)
@@ -41,7 +54,18 @@ struct ContentView: View {
             }
         }
         .onAppear {
-            loadBundledModel()
+            findBundledModels()
+            if let first = bundledModels.first {
+                loadModel(name: first.name, path: first.path)
+            }
+        }
+        .confirmationDialog("选择模型", isPresented: $showModelPicker) {
+            ForEach(bundledModels, id: \.path) { model in
+                Button(model.name) {
+                    loadModel(name: model.name, path: model.path)
+                }
+            }
+            Button("取消", role: .cancel) {}
         }
         .fileImporter(
             isPresented: $showFilePicker,
@@ -53,7 +77,7 @@ struct ContentView: View {
                 guard let url = urls.first else { return }
                 if url.startAccessingSecurityScopedResource() {
                     state.modelPath = url.path
-                    state.statusText = "已加载: \(url.lastPathComponent)"
+                    state.statusText = url.lastPathComponent
                 }
             case .failure(let error):
                 state.statusText = "错误: \(error.localizedDescription)"
@@ -61,16 +85,19 @@ struct ContentView: View {
         }
     }
 
-    func loadBundledModel() {
-        if let pmxURL = Bundle.main.url(forResource: "Reika Shimohira 2 18 V1", withExtension: "pmx") {
-            state.statusText = "找到模型，加载中..."
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                state.modelPath = pmxURL.path
-                state.statusText = "Reika Shimohira 2 18 V1.pmx"
-            }
-        } else {
-            let allPmx = Bundle.main.paths(forResourcesOfType: "pmx", inDirectory: nil)
-            state.statusText = "未找到内置模型 (pmx: \(allPmx.count))"
+    func findBundledModels() {
+        let paths = Bundle.main.paths(forResourcesOfType: "pmx", inDirectory: nil)
+        bundledModels = paths.map { path in
+            let name = (path as NSString).lastPathComponent
+            return (name: name, path: path)
+        }.sorted { $0.name < $1.name }
+    }
+
+    func loadModel(name: String, path: String) {
+        state.statusText = "加载中..."
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+            state.modelPath = path
+            state.statusText = name
         }
     }
 }
