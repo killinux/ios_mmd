@@ -84,6 +84,15 @@
         return NO;
     }
 
+    // Log bone names for debugging
+    auto *nodeMan = _model->GetNodeManager();
+    size_t nodeCount = nodeMan->GetNodeCount();
+    NSLog(@"[MMD] Model has %zu bones", nodeCount);
+    for (size_t i = 0; i < std::min(nodeCount, (size_t)5); i++) {
+        auto *node = nodeMan->GetMMDNode(i);
+        NSLog(@"[MMD]   Bone[%zu]: %s", i, node->GetName().c_str());
+    }
+
     return YES;
 }
 
@@ -102,6 +111,7 @@
     _currentFrame = frame;
     _model->BeginAnimation();
     _model->UpdateAllAnimation(_vmdAnim.get(), frame, elapsed);
+    _model->Update();
     _model->EndAnimation();
 }
 

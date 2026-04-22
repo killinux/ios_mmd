@@ -224,6 +224,9 @@ class MetalMMDRenderer: NSObject, MTKViewDelegate {
 
                 if animationLoaded && isPlaying {
                     currentFrame += 30.0 * dt * playbackSpeed
+                    if Int(currentFrame) % 30 == 0 {
+                        print("[MMD] Playing frame: \(currentFrame)")
+                    }
                     model.updateAnimation(currentFrame, physicsElapsed: dt)
                 } else {
                     model.updatePhysics(dt)

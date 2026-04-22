@@ -65,8 +65,9 @@ struct ContentView: View {
         }
         .onAppear {
             findBundledFiles()
-            if let first = bundledModels.first {
-                loadModel(name: first.name, path: first.path)
+            let preferred = bundledModels.first { $0.name.contains("V1") } ?? bundledModels.first
+            if let m = preferred {
+                loadModel(name: m.name, path: m.path)
             }
         }
         .confirmationDialog("选择模型", isPresented: $showModelPicker) {

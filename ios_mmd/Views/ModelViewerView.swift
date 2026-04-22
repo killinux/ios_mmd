@@ -11,7 +11,7 @@ struct ModelViewerView: UIViewRepresentable {
     func makeUIView(context: Context) -> MTKView {
         let mtkView = MTKView()
         mtkView.device = MTLCreateSystemDefaultDevice()
-        mtkView.preferredFramesPerSecond = 60
+        mtkView.preferredFramesPerSecond = 30
         mtkView.clearColor = MTLClearColor(red: 0.15, green: 0.15, blue: 0.18, alpha: 1.0)
         mtkView.depthStencilPixelFormat = .depth32Float
         mtkView.colorPixelFormat = .bgra8Unorm_srgb
