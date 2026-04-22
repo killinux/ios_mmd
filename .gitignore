@@ -12,3 +12,9 @@ Libraries/bullet3/
 
 # SabaLib symlinks and generated files
 ios_mmd/SabaLib/
+
+# PMX model files (too large for git)
+ios_mmd/Resources/
+*.pmx
+*.blend
+Reika Shimohira*
