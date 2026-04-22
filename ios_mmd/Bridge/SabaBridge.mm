@@ -5,6 +5,8 @@
 #include <Saba/Model/MMD/PMXModel.h>
 #include <Saba/Model/MMD/VMDFile.h>
 #include <Saba/Model/MMD/VMDAnimation.h>
+#include <Saba/Model/MMD/MMDPhysics.h>
+#include <btBulletDynamicsCommon.h>
 
 // MARK: - SabaSubMesh
 
@@ -44,7 +46,22 @@
         return NO;
     }
     _model->InitializeAnimation();
+    _model->BeginAnimation();
+    _model->UpdateMorphAnimation();
+    _model->UpdateNodeAnimation(false);
+    _model->UpdatePhysicsAnimation(0);
+    _model->UpdateNodeAnimation(true);
     _model->Update();
+    _model->EndAnimation();
+
+    // Debug: print first few vertex positions and index info
+    size_t vc = _model->GetVertexCount();
+    const glm::vec3 *pos = _model->GetUpdatePositions();
+    if (pos && vc > 0) {
+        NSLog(@"[MMD] First vertex pos: (%f, %f, %f)", pos[0].x, pos[0].y, pos[0].z);
+        NSLog(@"[MMD] IndexElementSize: %zu", _model->GetIndexElementSize());
+        NSLog(@"[MMD] IndexCount: %zu", _model->GetIndexCount());
+    }
     return YES;
 }
 
@@ -178,6 +195,24 @@
         [result addObject:mi];
     }
     return [result copy];
+}
+
+- (void)setGravityX:(float)x y:(float)y z:(float)z {
+    if (!_model) return;
+    auto *physics = _model->GetMMDPhysics();
+    if (!physics) return;
+    auto *world = physics->GetDynamicsWorld();
+    if (!world) return;
+    world->setGravity(btVector3(x, y, z));
+}
+
+- (void)updatePhysics:(float)elapsed {
+    if (!_model) return;
+    _model->BeginAnimation();
+    _model->UpdatePhysicsAnimation(elapsed);
+    _model->UpdateNodeAnimation(true);
+    _model->Update();
+    _model->EndAnimation();
 }
 
 @end

@@ -14,16 +14,18 @@ vertex VertexOut mmd_vertex(const device MMDVertex *vertices [[buffer(0)]],
                             constant MMDUniforms &uniforms   [[buffer(1)]],
                             uint vid                         [[vertex_id]])
 {
-    MMDVertex v = vertices[vid];
+    float3 pos = float3(vertices[vid].position);
+    float3 norm = float3(vertices[vid].normal);
+    float2 uv = float2(vertices[vid].uv);
 
-    float4 worldPos = uniforms.modelMatrix * float4(v.position, 1.0);
-    float3 worldNorm = normalize((uniforms.modelMatrix * float4(v.normal, 0.0)).xyz);
+    float4 worldPos = uniforms.modelMatrix * float4(pos, 1.0);
+    float3 worldNorm = normalize((uniforms.modelMatrix * float4(norm, 0.0)).xyz);
 
     VertexOut out;
     out.position = uniforms.projectionMatrix * uniforms.viewMatrix * worldPos;
     out.worldNormal = worldNorm;
     out.worldPosition = worldPos.xyz;
-    out.uv = v.uv;
+    out.uv = float2(uv.x, 1.0 - uv.y);
     return out;
 }
 
@@ -36,24 +38,23 @@ fragment float4 mmd_fragment(VertexOut in                          [[stage_in]],
     float3 N = normalize(in.worldNormal);
     float3 L = normalize(-uniforms.lightDirection);
 
-    float NdotL = dot(N, L);
-    float diffuseIntensity = step(0.0, NdotL) * 0.6 + 0.4;
+    float NdotL = max(dot(N, L), 0.0);
+    float toon = smoothstep(0.0, 0.1, NdotL) * 0.5 + 0.5;
 
-    float3 baseColor = mat.diffuse.rgb;
-
+    float4 texColor = float4(1.0);
     if (mat.hasTexture) {
-        float4 texColor = tex.sample(texSampler, in.uv);
-        baseColor *= texColor.rgb;
+        texColor = tex.sample(texSampler, in.uv);
     }
 
-    float3 color = mat.ambient + baseColor * diffuseIntensity;
+    float3 baseColor = mat.diffuse.rgb * texColor.rgb;
+    float3 color = baseColor * toon;
 
     if (mat.specularPower > 0.0) {
         float3 V = normalize(uniforms.cameraPosition - in.worldPosition);
         float3 H = normalize(L + V);
         float spec = pow(max(dot(N, H), 0.0), mat.specularPower);
-        color += mat.specular * spec;
+        color += mat.specular * spec * 0.3;
     }
 
-    return float4(saturate(color), mat.diffuse.a);
+    return float4(color, mat.diffuse.a * texColor.a);
 }

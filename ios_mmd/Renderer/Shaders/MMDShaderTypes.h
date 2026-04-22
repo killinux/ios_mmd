@@ -3,11 +3,21 @@
 
 #include <simd/simd.h>
 
+#ifdef __METAL_VERSION__
+// Metal side: packed_float3 = 12 bytes (no padding)
 struct MMDVertex {
-    simd_float3 position;
-    simd_float3 normal;
-    simd_float2 uv;
+    packed_float3 position;
+    packed_float3 normal;
+    float2 uv;
 };
+#else
+// CPU side: plain floats, 32 bytes total
+struct __attribute__((packed)) MMDVertex {
+    float position[3];
+    float normal[3];
+    float uv[2];
+};
+#endif
 
 struct MMDUniforms {
     simd_float4x4 modelMatrix;
@@ -18,11 +28,11 @@ struct MMDUniforms {
 };
 
 struct MMDMaterialUniforms {
-    simd_float4 diffuse;       // rgb + alpha
+    simd_float4 diffuse;
     simd_float3 specular;
     float specularPower;
     simd_float3 ambient;
     int hasTexture;
 };
 
-#endif /* MMDShaderTypes_h */
+#endif

@@ -24,6 +24,9 @@ NS_ASSUME_NONNULL_BEGIN
 @property (nonatomic, readonly) NSArray<SabaSubMesh *> *subMeshes;
 @property (nonatomic, readonly) NSArray<SabaMaterialInfo *> *materials;
 
+- (void)setGravityX:(float)x y:(float)y z:(float)z NS_SWIFT_NAME(setGravity(x:y:z:));
+- (void)updatePhysics:(float)elapsed;
+
 @end
 
 NS_ASSUME_NONNULL_END

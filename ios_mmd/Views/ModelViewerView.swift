@@ -2,7 +2,7 @@ import SwiftUI
 import MetalKit
 
 struct ModelViewerView: UIViewRepresentable {
-    let modelPath: String?
+    @ObservedObject var state: AppState
 
     func makeCoordinator() -> Coordinator {
         Coordinator()
@@ -12,6 +12,11 @@ struct ModelViewerView: UIViewRepresentable {
         let mtkView = MTKView()
         mtkView.device = MTLCreateSystemDefaultDevice()
         mtkView.preferredFramesPerSecond = 60
+        mtkView.clearColor = MTLClearColor(red: 0.15, green: 0.15, blue: 0.18, alpha: 1.0)
+        mtkView.depthStencilPixelFormat = .depth32Float
+        mtkView.colorPixelFormat = .bgra8Unorm_srgb
+        mtkView.isPaused = false
+        mtkView.enableSetNeedsDisplay = false
 
         guard let renderer = MetalMMDRenderer(mtkView: mtkView) else {
             fatalError("Failed to initialize MetalMMDRenderer")
@@ -19,8 +24,8 @@ struct ModelViewerView: UIViewRepresentable {
 
         mtkView.delegate = renderer
         context.coordinator.renderer = renderer
+        context.coordinator.mtkView = mtkView
 
-        // Gesture recognizers
         let panGesture = UIPanGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handlePan(_:)))
         panGesture.minimumNumberOfTouches = 1
         panGesture.maximumNumberOfTouches = 1
@@ -34,7 +39,7 @@ struct ModelViewerView: UIViewRepresentable {
         let pinchGesture = UIPinchGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handlePinch(_:)))
         mtkView.addGestureRecognizer(pinchGesture)
 
-        if let path = modelPath {
+        if let path = state.modelPath {
             renderer.loadModel(path: path)
         }
 
@@ -42,7 +47,7 @@ struct ModelViewerView: UIViewRepresentable {
     }
 
     func updateUIView(_ uiView: MTKView, context: Context) {
-        if let path = modelPath, context.coordinator.loadedPath != path {
+        if let path = state.modelPath, context.coordinator.loadedPath != path {
             context.coordinator.renderer?.loadModel(path: path)
             context.coordinator.loadedPath = path
         }
@@ -50,10 +55,8 @@ struct ModelViewerView: UIViewRepresentable {
 
     class Coordinator: NSObject {
         var renderer: MetalMMDRenderer?
+        var mtkView: MTKView?
         var loadedPath: String?
-
-        private var lastPanLocation: CGPoint = .zero
-        private var lastTwoFingerLocation: CGPoint = .zero
 
         @objc func handlePan(_ gesture: UIPanGestureRecognizer) {
             guard let renderer = renderer else { return }
