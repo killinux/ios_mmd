@@ -189,3 +189,55 @@ IPHONEOS_DEPLOYMENT_TARGET = 17.0
 5. 模型加载后可手势旋转/缩放查看
 6. 点击"加载动作"选择 VMD 文件
 7. 使用底部播放控制条控制动画
+
+
+## 当前实现状态
+
+### 已完成
+
+#### Phase 1: PMX 模型加载 + Metal 渲染
+- saba C++ 库解析 PMX 格式（顶点、面、骨骼、材质、物理刚体）
+- ObjC++ Bridge 层封装 saba API，暴露纯 ObjC 接口给 Swift
+- Metal 渲染管线：顶点 buffer → toon-style 着色器 → 逐材质 draw call
+- 纹理加载：MTKTextureLoader 加载 JPG/PNG 纹理
+- 两遍渲染：先不透明材质（depth write ON），再 PNG 透明材质（depth write OFF + alpha blend）
+- 轨道相机：旋转/缩放/平移手势控制
+
+#### Phase 4: Bullet 物理
+- Bullet3 通过 unity build 编译（153 个 .cpp 合并为一个编译单元）
+- saba 内部 MMDPhysics 自动创建 btDiscreteDynamicsWorld、刚体、约束
+- 头发、裙子、饰品等物理骨骼随重力摆动
+
+#### 设备陀螺仪物理
+- CMMotionManager 读取设备加速度计数据（60Hz）
+- 每帧将设备重力方向传给 Bullet Physics 的 `setGravity()`
+- 晃动手机时，头发/衣服物理部件实时响应
+
+### 实现原理
+
+```
+每帧渲染流程:
+
+1. CMMotionManager 读取设备加速度 → gravity(x, y, z)
+2. Bullet setGravity(gravity)
+3. saba BeginAnimation → UpdatePhysicsAnimation(dt) → UpdateNodeAnimation → Update → EndAnimation
+4. saba GetUpdatePositions/Normals/UVs → 交错打包 → memcpy 到 Metal vertex buffer
+5. Metal draw call: 遍历 submesh，绑定材质 uniform + 纹理 → drawIndexedPrimitives
+```
+
+### 关键技术细节
+
+- **packed_float3**: Metal 的 float3 占 16 字节（含 padding），但 CPU 端打包为 12 字节。使用 `packed_float3` 保证 32 字节/顶点对齐
+- **spdlog 替换**: saba 依赖 spdlog，用空宏 stub 替换（`SABA_INFO/WARN/ERROR` 为空，`SABA_ASSERT` 映射到 `assert`）
+- **Bullet unity build**: 153 个 .cpp 合并编译避免手动添加文件到 Xcode；`btSimulationIslandManagerMt.cpp` 单独编译避免 redefinition
+- **UV 翻转**: shader 中 `uv.y = 1.0 - uv.y` 修正纹理方向
+
+## TODO
+
+- [ ] **VMD 动画导入** — 加载 VMD 文件播放骨骼关键帧动画（Bridge 接口已准备好）
+- [ ] **播放控制 UI** — 播放/暂停、进度条、速度调节
+- [ ] **Sphere Map** — 实现球面贴图（修复眼睛材质）
+- [ ] **Toon 渲染完善** — Toon 渐变纹理、边缘线渲染
+- [ ] **VMD 相机动画** — 加载相机关键帧
+- [ ] **IK + Morph 表情** — 面部表情动画
+- [ ] **文件管理** — 从 Files app 导入 PMX/VMD
