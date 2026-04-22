@@ -1,0 +1,14 @@
+# macOS
+.DS_Store
+xcuserdata/
+*.xcuserstate
+DerivedData/
+build/
+
+# Libraries (cloned separately)
+Libraries/saba/
+Libraries/glm/
+Libraries/bullet3/
+
+# SabaLib symlinks and generated files
+ios_mmd/SabaLib/
