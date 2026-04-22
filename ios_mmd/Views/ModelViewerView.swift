@@ -50,6 +50,11 @@ struct ModelViewerView: UIViewRepresentable {
         if let path = state.modelPath, context.coordinator.loadedPath != path {
             context.coordinator.renderer?.loadModel(path: path)
             context.coordinator.loadedPath = path
+            context.coordinator.loadedVMD = nil
+        }
+        if let vmdPath = state.vmdPath, context.coordinator.loadedVMD != vmdPath {
+            context.coordinator.renderer?.loadAnimation(path: vmdPath)
+            context.coordinator.loadedVMD = vmdPath
         }
     }
 
@@ -57,6 +62,7 @@ struct ModelViewerView: UIViewRepresentable {
         var renderer: MetalMMDRenderer?
         var mtkView: MTKView?
         var loadedPath: String?
+        var loadedVMD: String?
 
         @objc func handlePan(_ gesture: UIPanGestureRecognizer) {
             guard let renderer = renderer else { return }

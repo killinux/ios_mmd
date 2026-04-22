@@ -6,13 +6,17 @@ class AppState: ObservableObject {
     @Published var modelPath: String? = nil
     @Published var statusText = "启动中..."
     @Published var modelLoaded = false
+    @Published var vmdPath: String? = nil
 }
 
 struct ContentView: View {
     @StateObject private var state = AppState()
     @State private var showFilePicker = false
     @State private var showModelPicker = false
+    @State private var showVMDPicker = false
     @State private var bundledModels: [(name: String, path: String)] = []
+    @State private var bundledVMDs: [(name: String, path: String)] = []
+    @State private var isPlaying = false
 
     var body: some View {
         ZStack {
@@ -20,7 +24,7 @@ struct ContentView: View {
                 .ignoresSafeArea()
 
             VStack {
-                HStack {
+                HStack(spacing: 8) {
                     Text(state.statusText)
                         .font(.caption)
                         .foregroundStyle(.white)
@@ -29,72 +33,85 @@ struct ContentView: View {
                         .clipShape(Capsule())
                     Spacer()
 
-                    Button {
-                        showModelPicker = true
-                    } label: {
+                    Button { showModelPicker = true } label: {
                         Image(systemName: "cube")
-                            .font(.title2)
-                            .padding(12)
+                            .font(.title3)
+                            .padding(10)
                             .background(.ultraThinMaterial)
                             .clipShape(Circle())
                     }
 
-                    Button {
-                        showFilePicker = true
-                    } label: {
+                    Button { showVMDPicker = true } label: {
+                        Image(systemName: "figure.dance")
+                            .font(.title3)
+                            .padding(10)
+                            .background(.ultraThinMaterial)
+                            .clipShape(Circle())
+                    }
+
+                    Button { showFilePicker = true } label: {
                         Image(systemName: "folder.badge.plus")
-                            .font(.title2)
-                            .padding(12)
+                            .font(.title3)
+                            .padding(10)
                             .background(.ultraThinMaterial)
                             .clipShape(Circle())
                     }
                 }
-                .padding()
+                .padding(.horizontal)
+                .padding(.top, 8)
+
                 Spacer()
             }
         }
         .onAppear {
-            findBundledModels()
+            findBundledFiles()
             if let first = bundledModels.first {
                 loadModel(name: first.name, path: first.path)
             }
         }
         .confirmationDialog("选择模型", isPresented: $showModelPicker) {
-            ForEach(bundledModels, id: \.path) { model in
-                Button(model.name) {
-                    loadModel(name: model.name, path: model.path)
+            ForEach(bundledModels, id: \.path) { m in
+                Button(m.name) { loadModel(name: m.name, path: m.path) }
+            }
+        }
+        .confirmationDialog("选择动作", isPresented: $showVMDPicker) {
+            ForEach(bundledVMDs, id: \.path) { v in
+                Button(v.name) {
+                    state.vmdPath = v.path
+                    state.statusText = "\(state.statusText.components(separatedBy: " | ").first ?? "") | \(v.name)"
                 }
             }
-            Button("取消", role: .cancel) {}
         }
         .fileImporter(
             isPresented: $showFilePicker,
-            allowedContentTypes: [UTType(filenameExtension: "pmx") ?? .data],
+            allowedContentTypes: [UTType(filenameExtension: "pmx") ?? .data, UTType(filenameExtension: "vmd") ?? .data],
             allowsMultipleSelection: false
         ) { result in
-            switch result {
-            case .success(let urls):
-                guard let url = urls.first else { return }
+            if case .success(let urls) = result, let url = urls.first {
                 if url.startAccessingSecurityScopedResource() {
-                    state.modelPath = url.path
-                    state.statusText = url.lastPathComponent
+                    if url.pathExtension.lowercased() == "vmd" {
+                        state.vmdPath = url.path
+                    } else {
+                        state.modelPath = url.path
+                        state.statusText = url.lastPathComponent
+                    }
                 }
-            case .failure(let error):
-                state.statusText = "错误: \(error.localizedDescription)"
             }
         }
     }
 
-    func findBundledModels() {
-        let paths = Bundle.main.paths(forResourcesOfType: "pmx", inDirectory: nil)
-        bundledModels = paths.map { path in
-            let name = (path as NSString).lastPathComponent
-            return (name: name, path: path)
-        }.sorted { $0.name < $1.name }
+    func findBundledFiles() {
+        bundledModels = Bundle.main.paths(forResourcesOfType: "pmx", inDirectory: nil)
+            .map { (name: ($0 as NSString).lastPathComponent, path: $0) }
+            .sorted { $0.name < $1.name }
+        bundledVMDs = Bundle.main.paths(forResourcesOfType: "vmd", inDirectory: nil)
+            .map { (name: ($0 as NSString).lastPathComponent, path: $0) }
+            .sorted { $0.name < $1.name }
     }
 
     func loadModel(name: String, path: String) {
         state.statusText = "加载中..."
+        state.vmdPath = nil
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
             state.modelPath = path
             state.statusText = name

@@ -26,6 +26,11 @@ class MetalMMDRenderer: NSObject, MTKViewDelegate {
     private var lastFrameTime: CFTimeInterval = 0
     private let motion = MotionManager.shared
 
+    var isPlaying = false
+    var currentFrame: Float = 0
+    var playbackSpeed: Float = 1.0
+    private var animationLoaded = false
+
     init?(mtkView: MTKView) {
         guard let device = mtkView.device,
               let queue = device.makeCommandQueue() else {
@@ -135,6 +140,9 @@ class MetalMMDRenderer: NSObject, MTKViewDelegate {
 
         motion.start()
         lastFrameTime = CACurrentMediaTime()
+        animationLoaded = false
+        currentFrame = 0
+        isPlaying = false
 
         for (i, sub) in subMeshes.enumerated() {
             let matID = Int(sub.materialID)
@@ -174,6 +182,20 @@ class MetalMMDRenderer: NSObject, MTKViewDelegate {
         }
     }
 
+    func loadAnimation(path: String) {
+        guard let model = model else { return }
+        print("[MMD] Loading animation: \(path)")
+        if model.loadAnimation(fromPath: path) {
+            model.initializeAnimation()
+            animationLoaded = true
+            currentFrame = 0
+            isPlaying = true
+            print("[MMD] Animation loaded, playing")
+        } else {
+            print("[MMD] FAILED to load animation")
+        }
+    }
+
     func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {
         viewportSize = size
     }
@@ -192,14 +214,21 @@ class MetalMMDRenderer: NSObject, MTKViewDelegate {
            let indexBuffer = indexBuffer,
            let model = model {
 
-            // Update physics with device motion gravity
             let now = CACurrentMediaTime()
             let dt = Float(now - lastFrameTime)
             lastFrameTime = now
+
             if dt > 0 && dt < 0.1 {
                 let g = motion.gravity
                 model.setGravity(x: g.x, y: g.y, z: g.z)
-                model.updatePhysics(dt)
+
+                if animationLoaded && isPlaying {
+                    currentFrame += 30.0 * dt * playbackSpeed
+                    model.updateAnimation(currentFrame, physicsElapsed: dt)
+                } else {
+                    model.updatePhysics(dt)
+                }
+
                 let dest = vertexBuffer.contents().bindMemory(to: Float.self, capacity: Int(model.vertexCount) * 8)
                 model.copyInterleavedVertices(dest)
             }
