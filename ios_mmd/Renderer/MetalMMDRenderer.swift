@@ -31,6 +31,19 @@ class MetalMMDRenderer: NSObject, MTKViewDelegate {
     var playbackSpeed: Float = 1.0
     private var animationLoaded = false
 
+    // Studio lighting SH coefficients (warm key from upper-left, cool fill, warm ground bounce)
+    private let studioSH: [SIMD3<Float>] = [
+        SIMD3<Float>(0.7, 0.7, 0.8),       // L00 - ambient base
+        SIMD3<Float>(0.0, 0.1, 0.1),       // L1-1 - top/bottom
+        SIMD3<Float>(0.2, 0.2, 0.25),      // L10 - front/back
+        SIMD3<Float>(0.15, 0.12, 0.1),     // L11 - left/right
+        SIMD3<Float>(0.0, 0.0, 0.0),       // L2-2
+        SIMD3<Float>(0.0, 0.0, 0.0),       // L2-1
+        SIMD3<Float>(-0.05, -0.05, -0.05), // L20
+        SIMD3<Float>(0.0, 0.0, 0.0),       // L21
+        SIMD3<Float>(0.02, 0.01, 0.0),     // L22
+    ]
+
     init?(mtkView: MTKView) {
         guard let device = mtkView.device,
               let queue = device.makeCommandQueue() else {
@@ -41,32 +54,33 @@ class MetalMMDRenderer: NSObject, MTKViewDelegate {
 
         super.init()
 
-        buildPipeline(mtkView: mtkView)
+        mtkView.sampleCount = 1
+
+        buildPipelines(mtkView: mtkView)
         buildDepthState()
         buildSamplerState()
         buildDummyTexture()
     }
 
-    private func buildPipeline(mtkView: MTKView) {
-        guard let library = device.makeDefaultLibrary(),
-              let vertexFn = library.makeFunction(name: "mmd_vertex"),
-              let fragFn = library.makeFunction(name: "mmd_fragment") else {
-            fatalError("Failed to load Metal shader functions")
+    private func buildPipelines(mtkView: MTKView) {
+        guard let library = device.makeDefaultLibrary() else {
+            fatalError("Failed to load Metal shader library")
         }
 
-        let desc = MTLRenderPipelineDescriptor()
-        desc.vertexFunction = vertexFn
-        desc.fragmentFunction = fragFn
-        desc.colorAttachments[0].pixelFormat = mtkView.colorPixelFormat
-        desc.depthAttachmentPixelFormat = mtkView.depthStencilPixelFormat
-        desc.colorAttachments[0].isBlendingEnabled = true
-        desc.colorAttachments[0].sourceRGBBlendFactor = .sourceAlpha
-        desc.colorAttachments[0].destinationRGBBlendFactor = .oneMinusSourceAlpha
-        desc.colorAttachments[0].sourceAlphaBlendFactor = .one
-        desc.colorAttachments[0].destinationAlphaBlendFactor = .oneMinusSourceAlpha
+        let mainDesc = MTLRenderPipelineDescriptor()
+        mainDesc.vertexFunction = library.makeFunction(name: "mmd_vertex")
+        mainDesc.fragmentFunction = library.makeFunction(name: "mmd_fragment")
+        mainDesc.colorAttachments[0].pixelFormat = mtkView.colorPixelFormat
+        mainDesc.depthAttachmentPixelFormat = mtkView.depthStencilPixelFormat
+        mainDesc.sampleCount = mtkView.sampleCount
+        mainDesc.colorAttachments[0].isBlendingEnabled = true
+        mainDesc.colorAttachments[0].sourceRGBBlendFactor = .sourceAlpha
+        mainDesc.colorAttachments[0].destinationRGBBlendFactor = .oneMinusSourceAlpha
+        mainDesc.colorAttachments[0].sourceAlphaBlendFactor = .one
+        mainDesc.colorAttachments[0].destinationAlphaBlendFactor = .oneMinusSourceAlpha
 
         do {
-            pipelineState = try device.makeRenderPipelineState(descriptor: desc)
+            pipelineState = try device.makeRenderPipelineState(descriptor: mainDesc)
         } catch {
             fatalError("Failed to create pipeline state: \(error)")
         }
@@ -104,7 +118,6 @@ class MetalMMDRenderer: NSObject, MTKViewDelegate {
     func loadModel(path: String) {
         let modelDir = (path as NSString).deletingLastPathComponent
         print("[MMD] Loading model: \(path)")
-        print("[MMD] Model dir: \(modelDir)")
 
         let sabaModel = SabaMMDModel()
         guard sabaModel.loadModel(path: path, dataDir: modelDir) else {
@@ -125,7 +138,6 @@ class MetalMMDRenderer: NSObject, MTKViewDelegate {
         if let vb = vertexBuffer {
             let dest = vb.contents().bindMemory(to: Float.self, capacity: vc * 8)
             sabaModel.copyInterleavedVertices(dest)
-            print("[MMD] Vertex buffer uploaded: \(byteCount) bytes")
         }
 
         let elemSize = Int(sabaModel.indexElementSize)
@@ -133,23 +145,14 @@ class MetalMMDRenderer: NSObject, MTKViewDelegate {
         let indexByteCount = ic * elemSize
         let rawPtr = sabaModel.rawIndices()
         indexBuffer = device.makeBuffer(bytes: rawPtr, length: indexByteCount, options: .storageModeShared)
-        print("[MMD] Index buffer uploaded: \(indexByteCount) bytes, elemSize=\(elemSize)")
 
         loadTextures(modelDir: modelDir)
-        print("[MMD] Textures loaded: \(textures.count)")
 
         motion.start()
         lastFrameTime = CACurrentMediaTime()
         animationLoaded = false
         currentFrame = 0
         isPlaying = false
-
-        for (i, sub) in subMeshes.enumerated() {
-            let matID = Int(sub.materialID)
-            let mat = materialInfos[matID]
-            let hasTex = textures[matID] != nil
-            print("[MMD] SubMesh[\(i)] matID=\(matID) verts=\(sub.vertexCount) alpha=\(mat.alpha) tex=\(mat.texturePath ?? "none") loaded=\(hasTex)")
-        }
     }
 
     private func loadTextures(modelDir: String) {
@@ -200,6 +203,35 @@ class MetalMMDRenderer: NSObject, MTKViewDelegate {
         viewportSize = size
     }
 
+    private func buildSceneUniforms() -> MMDSceneUniforms {
+        let aspect = Float(viewportSize.width / max(viewportSize.height, 1))
+        let projection = Camera.perspective(fovYDegrees: 30.0, aspect: aspect, near: 0.1, far: 1000.0)
+
+        var scene = MMDSceneUniforms()
+        scene.modelMatrix = matrix_identity_float4x4
+        scene.viewMatrix = camera.viewMatrix
+        scene.projectionMatrix = projection
+        scene.lightDirection = SIMD3<Float>(-0.5, -1.0, -0.5)
+        scene._pad0 = 0
+        scene.lightColor = SIMD3<Float>(1.0, 0.98, 0.95)
+        scene._pad1 = 0
+        scene.cameraPosition = camera.cameraPosition
+        scene.ambientIntensity = 1.0
+
+        // Pack SH coefficients into simd_float4 (xyz = coeff, w = 0)
+        scene.sh.0 = SIMD4<Float>(studioSH[0].x, studioSH[0].y, studioSH[0].z, 0)
+        scene.sh.1 = SIMD4<Float>(studioSH[1].x, studioSH[1].y, studioSH[1].z, 0)
+        scene.sh.2 = SIMD4<Float>(studioSH[2].x, studioSH[2].y, studioSH[2].z, 0)
+        scene.sh.3 = SIMD4<Float>(studioSH[3].x, studioSH[3].y, studioSH[3].z, 0)
+        scene.sh.4 = SIMD4<Float>(studioSH[4].x, studioSH[4].y, studioSH[4].z, 0)
+        scene.sh.5 = SIMD4<Float>(studioSH[5].x, studioSH[5].y, studioSH[5].z, 0)
+        scene.sh.6 = SIMD4<Float>(studioSH[6].x, studioSH[6].y, studioSH[6].z, 0)
+        scene.sh.7 = SIMD4<Float>(studioSH[7].x, studioSH[7].y, studioSH[7].z, 0)
+        scene.sh.8 = SIMD4<Float>(studioSH[8].x, studioSH[8].y, studioSH[8].z, 0)
+
+        return scene
+    }
+
     func draw(in view: MTKView) {
         guard let renderPassDesc = view.currentRenderPassDescriptor,
               let drawable = view.currentDrawable,
@@ -207,8 +239,6 @@ class MetalMMDRenderer: NSObject, MTKViewDelegate {
               let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: renderPassDesc) else {
             return
         }
-
-        encoder.setCullMode(.none)
 
         if let vertexBuffer = vertexBuffer,
            let indexBuffer = indexBuffer,
@@ -224,9 +254,6 @@ class MetalMMDRenderer: NSObject, MTKViewDelegate {
 
                 if animationLoaded && isPlaying {
                     currentFrame += 30.0 * dt * playbackSpeed
-                    if Int(currentFrame) % 30 == 0 {
-                        print("[MMD] Playing frame: \(currentFrame)")
-                    }
                     model.updateAnimation(currentFrame, physicsElapsed: dt)
                 } else {
                     model.updatePhysics(dt)
@@ -236,24 +263,17 @@ class MetalMMDRenderer: NSObject, MTKViewDelegate {
                 model.copyInterleavedVertices(dest)
             }
 
-            let aspect = Float(viewportSize.width / max(viewportSize.height, 1))
-            let projection = Camera.perspective(fovYDegrees: 30.0, aspect: aspect, near: 0.1, far: 1000.0)
+            var scene = buildSceneUniforms()
 
-            var uniforms = MMDUniforms(
-                modelMatrix: matrix_identity_float4x4,
-                viewMatrix: camera.viewMatrix,
-                projectionMatrix: projection,
-                lightDirection: SIMD3<Float>(-0.5, -1.0, -0.5),
-                cameraPosition: camera.cameraPosition
-            )
-
+            // ── Main pass ──
             encoder.setRenderPipelineState(pipelineState)
+            encoder.setCullMode(.none)
             encoder.setVertexBuffer(vertexBuffer, offset: 0, index: 0)
-            encoder.setVertexBytes(&uniforms, length: MemoryLayout<MMDUniforms>.size, index: 1)
-            encoder.setFragmentBytes(&uniforms, length: MemoryLayout<MMDUniforms>.size, index: 1)
+            encoder.setVertexBytes(&scene, length: MemoryLayout<MMDSceneUniforms>.size, index: 1)
+            encoder.setFragmentBytes(&scene, length: MemoryLayout<MMDSceneUniforms>.size, index: 1)
             encoder.setFragmentSamplerState(samplerState, index: 0)
 
-            // Pass 1: opaque submeshes (non-PNG), depth write ON
+            // Opaque submeshes
             encoder.setDepthStencilState(depthStateWrite)
             for sub in subMeshes {
                 let matID = Int(sub.materialID)
@@ -263,7 +283,7 @@ class MetalMMDRenderer: NSObject, MTKViewDelegate {
                 drawSubMesh(encoder: encoder, sub: sub, mat: mat, model: model, indexBuffer: indexBuffer)
             }
 
-            // Pass 2: transparent submeshes (PNG), depth write OFF, alpha blended
+            // Transparent submeshes (PNG)
             encoder.setDepthStencilState(depthStateNoWrite)
             for sub in subMeshes {
                 let matID = Int(sub.materialID)
@@ -284,12 +304,22 @@ class MetalMMDRenderer: NSObject, MTKViewDelegate {
         let matID = Int(sub.materialID)
         let hasTex = textures[matID] != nil
 
+        // Convert MMD specularPower to PBR roughness
+        let roughness = Float(1.0 - min(mat.specularPower / 100.0, 1.0))
+        // Estimate metallic from specular intensity
+        let specAvg = (mat.specularR + mat.specularG + mat.specularB) / 3.0
+        let metallic: Float = specAvg > 0.5 ? 0.3 : 0.0
+
         var matUniforms = MMDMaterialUniforms(
             diffuse: SIMD4<Float>(mat.diffuseR, mat.diffuseG, mat.diffuseB, mat.alpha),
             specular: SIMD3<Float>(mat.specularR, mat.specularG, mat.specularB),
             specularPower: mat.specularPower,
             ambient: SIMD3<Float>(mat.ambientR, mat.ambientG, mat.ambientB),
-            hasTexture: hasTex ? 1 : 0
+            hasTexture: hasTex ? 1 : 0,
+            roughness: roughness,
+            metallic: metallic,
+            _pad0: 0,
+            _pad1: 0
         )
 
         encoder.setFragmentBytes(&matUniforms, length: MemoryLayout<MMDMaterialUniforms>.size, index: 0)

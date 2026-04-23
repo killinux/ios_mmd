@@ -241,3 +241,133 @@ IPHONEOS_DEPLOYMENT_TARGET = 17.0
 - [ ] **VMD 相机动画** — 加载相机关键帧
 - [ ] **IK + Morph 表情** — 面部表情动画
 - [ ] **文件管理** — 从 Files app 导入 PMX/VMD
+
+
+## 渲染引擎技术文档
+
+### 渲染管线架构
+
+```
+每帧渲染流程:
+
+1. 动画更新
+   CMMotionManager → gravity → Bullet setGravity()
+   VMDAnimation::Evaluate(frame) → bone transforms
+   UpdateAllAnimation() + Update() → 最终顶点位置
+   copyInterleavedVertices → Metal vertex buffer
+
+2. 渲染
+   Pass 1: 不透明材质 (JPG textures, depth write ON)
+   Pass 2: 透明材质 (PNG textures, depth write OFF, alpha blend)
+
+3. 后处理
+   ACES tone mapping (在 fragment shader 内完成)
+```
+
+### PBR 渲染原理 (Physically Based Rendering)
+
+#### 为什么 PBR 比 Toon 着色更真实
+
+传统 Toon 着色用简单的 `step()` 函数区分亮面和暗面，所有材质看起来一样。PBR 基于物理规律模拟光线和材质的交互：
+
+- **金属表面**反射周围环境的颜色
+- **粗糙表面**把光线散射到各个方向（看起来哑光）
+- **光滑表面**产生锐利的高光点
+- **菲涅尔效应**：从掠射角看任何表面都更反光（边缘发亮）
+
+#### Cook-Torrance BRDF
+
+我们使用的微表面反射模型：
+
+```
+BRDF = (D * G * F) / (4 * NdotV * NdotL)
+
+D = GGX 法线分布函数 — 微表面法线朝向 H 的概率
+    roughness 越大 → 分布越宽 → 高光越散
+    
+G = Schlick-GGX 几何遮挡函数 — 微表面之间互相遮挡的比例
+    roughness 越大 → 遮挡越多 → 边缘变暗
+    
+F = Schlick 菲涅尔近似 — 不同角度的反射率
+    F0 = 0.04（绝缘体）或 albedo（金属）
+    掠射角时所有材质反射率趋向 1.0
+```
+
+#### MMD 材质到 PBR 的转换
+
+PMX 模型的材质格式是 MMD 时代的（2008 年），需要转换为 PBR 参数：
+
+```
+albedo    = m_diffuse.rgb * texture.rgb     (基础颜色)
+roughness = 1.0 - clamp(specularPower/100)  (高光强 → 粗糙度低)
+metallic  = avg(specular) > 0.5 ? 0.3 : 0   (有高光 → 轻微金属感)
+F0        = mix(0.04, albedo, metallic)      (基础反射率)
+```
+
+### IBL 环境光照 (Image-Based Lighting)
+
+#### 为什么 IBL 效果好
+
+Blender Eevee 默认用 HDRI 环境贴图照亮场景，光线从四面八方照射模型，每个方向的光色和强度都不同。这比单一方向光自然得多。
+
+#### 球谐光照 (Spherical Harmonics)
+
+我们不加载实际的 HDRI 图片，而是用 9 个系数（3 阶球谐函数）编码整个环境光照：
+
+```
+SH 基函数（9 个系数）:
+L00:  常数项 — 整体亮度
+L1-1: Y 方向 — 上下明暗差异
+L10:  Z 方向 — 前后明暗差异
+L11:  X 方向 — 左右明暗差异
+L2*:  二阶细节 — 对角方向的色彩变化
+
+evaluateSH(normal) = SH[0]
+    + SH[1]*y + SH[2]*z + SH[3]*x          // 一阶：方向性
+    + SH[4]*xy + SH[5]*yz + SH[6]*(3z²-1)  // 二阶：细节
+    + SH[7]*xz + SH[8]*(x²-y²)
+```
+
+预设的 Studio 光照 SH 系数模拟摄影棚环境：
+- 上方偏冷（天光）
+- 正面偏亮（主光）
+- 左侧偏暖（补光）
+- 底部微暖（地面反弹光）
+
+#### IBL 漫反射与镜面反射
+
+```
+IBL_diffuse  = evaluateSH(N) * albedo * (1 - metallic)
+  → 法线方向采样环境光 × 材质颜色
+
+IBL_specular = evaluateSH(R) * F * (1 - roughness * 0.7)
+  → 反射方向采样环境光 × 菲涅尔 × 光滑度
+  → 光滑表面反射清晰，粗糙表面反射模糊
+```
+
+### ACES Tone Mapping
+
+HDR 渲染结果需要映射到 [0,1] 范围才能显示。ACES（Academy Color Encoding System）是电影工业标准：
+
+```
+ACES(x) = (x * (2.51x + 0.03)) / (x * (2.43x + 0.59) + 0.14)
+```
+
+特点：暗部保留细节、亮部柔和压缩、色彩不会过饱和。
+
+### 性能优化策略
+
+- **单 pass 着色**: PBR 计算全在 fragment shader 内，不需要额外 render pass
+- **SH 代替 HDRI**: 9 个 float3 (108 bytes) 代替加载 HDRI 图片 (~数 MB)，采样是简单的点乘
+- **材质转换在 CPU**: roughness/metallic 在模型加载时一次性计算，不在每帧 shader 里转换
+- **30fps 帧率**: 每帧 33ms 预算，PBR 计算约增加 2-3ms
+
+### 未来可升级方向
+
+| 技术 | 效果 | 工作量 | 说明 |
+|------|------|--------|------|
+| 法线贴图 | 皮肤/衣服细节 | 小 | 模型自带 _N.jpg |
+| SSAO | 凹陷处阴影 | 大 | 半分辨率 compute shader |
+| Bloom | 高光辉光 | 中 | 降采样 + 高斯模糊 |
+| 阴影映射 | 地面阴影 | 中 | 单光源 shadow map |
+| 真实 HDRI | 更自然环境光 | 中 | 加载 .hdr 文件生成 cubemap |

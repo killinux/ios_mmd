@@ -19,12 +19,18 @@ struct __attribute__((packed)) MMDVertex {
 };
 #endif
 
-struct MMDUniforms {
+struct MMDSceneUniforms {
     simd_float4x4 modelMatrix;
     simd_float4x4 viewMatrix;
     simd_float4x4 projectionMatrix;
     simd_float3 lightDirection;
+    float _pad0;
+    simd_float3 lightColor;
+    float _pad1;
     simd_float3 cameraPosition;
+    float ambientIntensity;
+    // Spherical harmonics (9 coefficients for diffuse irradiance)
+    simd_float4 sh[9]; // xyz = coefficient, w unused (padding for Metal alignment)
 };
 
 struct MMDMaterialUniforms {
@@ -33,6 +39,10 @@ struct MMDMaterialUniforms {
     float specularPower;
     simd_float3 ambient;
     int hasTexture;
+    float roughness;
+    float metallic;
+    float _pad0;
+    float _pad1;
 };
 
 #endif
