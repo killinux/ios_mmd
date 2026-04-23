@@ -8,7 +8,6 @@ class MetalMMDRenderer: NSObject, MTKViewDelegate {
     let camera = Camera()
 
     private var pipelineState: MTLRenderPipelineState!
-    private var edgePipelineState: MTLRenderPipelineState!
     private var depthStateWrite: MTLDepthStencilState!
     private var depthStateNoWrite: MTLDepthStencilState!
     private var samplerState: MTLSamplerState!
@@ -42,48 +41,32 @@ class MetalMMDRenderer: NSObject, MTKViewDelegate {
 
         super.init()
 
-        mtkView.sampleCount = 4
-
-        buildPipelines(mtkView: mtkView)
+        buildPipeline(mtkView: mtkView)
         buildDepthState()
         buildSamplerState()
         buildDummyTexture()
     }
 
-    private func buildPipelines(mtkView: MTKView) {
-        guard let library = device.makeDefaultLibrary() else {
-            fatalError("Failed to load Metal shader library")
+    private func buildPipeline(mtkView: MTKView) {
+        guard let library = device.makeDefaultLibrary(),
+              let vertexFn = library.makeFunction(name: "mmd_vertex"),
+              let fragFn = library.makeFunction(name: "mmd_fragment") else {
+            fatalError("Failed to load Metal shader functions")
         }
 
-        // Main pipeline
-        let mainDesc = MTLRenderPipelineDescriptor()
-        mainDesc.vertexFunction = library.makeFunction(name: "mmd_vertex")
-        mainDesc.fragmentFunction = library.makeFunction(name: "mmd_fragment")
-        mainDesc.colorAttachments[0].pixelFormat = mtkView.colorPixelFormat
-        mainDesc.depthAttachmentPixelFormat = mtkView.depthStencilPixelFormat
-        mainDesc.sampleCount = mtkView.sampleCount
-        mainDesc.colorAttachments[0].isBlendingEnabled = true
-        mainDesc.colorAttachments[0].sourceRGBBlendFactor = .sourceAlpha
-        mainDesc.colorAttachments[0].destinationRGBBlendFactor = .oneMinusSourceAlpha
-        mainDesc.colorAttachments[0].sourceAlphaBlendFactor = .one
-        mainDesc.colorAttachments[0].destinationAlphaBlendFactor = .oneMinusSourceAlpha
-
-        // Edge pipeline (front face culled, renders back faces expanded)
-        let edgeDesc = MTLRenderPipelineDescriptor()
-        edgeDesc.vertexFunction = library.makeFunction(name: "mmd_edge_vertex")
-        edgeDesc.fragmentFunction = library.makeFunction(name: "mmd_edge_fragment")
-        edgeDesc.colorAttachments[0].pixelFormat = mtkView.colorPixelFormat
-        edgeDesc.depthAttachmentPixelFormat = mtkView.depthStencilPixelFormat
-        edgeDesc.sampleCount = mtkView.sampleCount
-        edgeDesc.colorAttachments[0].isBlendingEnabled = true
-        edgeDesc.colorAttachments[0].sourceRGBBlendFactor = .sourceAlpha
-        edgeDesc.colorAttachments[0].destinationRGBBlendFactor = .oneMinusSourceAlpha
-        edgeDesc.colorAttachments[0].sourceAlphaBlendFactor = .one
-        edgeDesc.colorAttachments[0].destinationAlphaBlendFactor = .oneMinusSourceAlpha
+        let desc = MTLRenderPipelineDescriptor()
+        desc.vertexFunction = vertexFn
+        desc.fragmentFunction = fragFn
+        desc.colorAttachments[0].pixelFormat = mtkView.colorPixelFormat
+        desc.depthAttachmentPixelFormat = mtkView.depthStencilPixelFormat
+        desc.colorAttachments[0].isBlendingEnabled = true
+        desc.colorAttachments[0].sourceRGBBlendFactor = .sourceAlpha
+        desc.colorAttachments[0].destinationRGBBlendFactor = .oneMinusSourceAlpha
+        desc.colorAttachments[0].sourceAlphaBlendFactor = .one
+        desc.colorAttachments[0].destinationAlphaBlendFactor = .oneMinusSourceAlpha
 
         do {
-            pipelineState = try device.makeRenderPipelineState(descriptor: mainDesc)
-            edgePipelineState = try device.makeRenderPipelineState(descriptor: edgeDesc)
+            pipelineState = try device.makeRenderPipelineState(descriptor: desc)
         } catch {
             fatalError("Failed to create pipeline state: \(error)")
         }
@@ -121,6 +104,7 @@ class MetalMMDRenderer: NSObject, MTKViewDelegate {
     func loadModel(path: String) {
         let modelDir = (path as NSString).deletingLastPathComponent
         print("[MMD] Loading model: \(path)")
+        print("[MMD] Model dir: \(modelDir)")
 
         let sabaModel = SabaMMDModel()
         guard sabaModel.loadModel(path: path, dataDir: modelDir) else {
@@ -141,6 +125,7 @@ class MetalMMDRenderer: NSObject, MTKViewDelegate {
         if let vb = vertexBuffer {
             let dest = vb.contents().bindMemory(to: Float.self, capacity: vc * 8)
             sabaModel.copyInterleavedVertices(dest)
+            print("[MMD] Vertex buffer uploaded: \(byteCount) bytes")
         }
 
         let elemSize = Int(sabaModel.indexElementSize)
@@ -148,14 +133,23 @@ class MetalMMDRenderer: NSObject, MTKViewDelegate {
         let indexByteCount = ic * elemSize
         let rawPtr = sabaModel.rawIndices()
         indexBuffer = device.makeBuffer(bytes: rawPtr, length: indexByteCount, options: .storageModeShared)
+        print("[MMD] Index buffer uploaded: \(indexByteCount) bytes, elemSize=\(elemSize)")
 
         loadTextures(modelDir: modelDir)
+        print("[MMD] Textures loaded: \(textures.count)")
 
         motion.start()
         lastFrameTime = CACurrentMediaTime()
         animationLoaded = false
         currentFrame = 0
         isPlaying = false
+
+        for (i, sub) in subMeshes.enumerated() {
+            let matID = Int(sub.materialID)
+            let mat = materialInfos[matID]
+            let hasTex = textures[matID] != nil
+            print("[MMD] SubMesh[\(i)] matID=\(matID) verts=\(sub.vertexCount) alpha=\(mat.alpha) tex=\(mat.texturePath ?? "none") loaded=\(hasTex)")
+        }
     }
 
     private func loadTextures(modelDir: String) {
@@ -214,6 +208,8 @@ class MetalMMDRenderer: NSObject, MTKViewDelegate {
             return
         }
 
+        encoder.setCullMode(.none)
+
         if let vertexBuffer = vertexBuffer,
            let indexBuffer = indexBuffer,
            let model = model {
@@ -228,6 +224,9 @@ class MetalMMDRenderer: NSObject, MTKViewDelegate {
 
                 if animationLoaded && isPlaying {
                     currentFrame += 30.0 * dt * playbackSpeed
+                    if Int(currentFrame) % 30 == 0 {
+                        print("[MMD] Playing frame: \(currentFrame)")
+                    }
                     model.updateAnimation(currentFrame, physicsElapsed: dt)
                 } else {
                     model.updatePhysics(dt)
@@ -248,44 +247,13 @@ class MetalMMDRenderer: NSObject, MTKViewDelegate {
                 cameraPosition: camera.cameraPosition
             )
 
-            // ── Edge pass (back faces expanded, drawn first) ──
-            encoder.setRenderPipelineState(edgePipelineState)
-            encoder.setDepthStencilState(depthStateWrite)
-            encoder.setCullMode(.front)
-            encoder.setVertexBuffer(vertexBuffer, offset: 0, index: 0)
-            encoder.setVertexBytes(&uniforms, length: MemoryLayout<MMDUniforms>.size, index: 1)
-
-            for sub in subMeshes {
-                let matID = Int(sub.materialID)
-                guard let mat = (matID >= 0 && matID < materialInfos.count) ? materialInfos[matID] : nil else { continue }
-                if mat.edgeSize <= 0 { continue }
-                let texPath = (mat.texturePath ?? "").lowercased()
-                if texPath.hasSuffix(".png") { continue }
-
-                var edgeSize = mat.edgeSize * 0.01
-                var edgeColor = SIMD4<Float>(0.0, 0.0, 0.0, 1.0)
-                encoder.setVertexBytes(&edgeSize, length: MemoryLayout<Float>.size, index: 2)
-                encoder.setFragmentBytes(&edgeColor, length: MemoryLayout<SIMD4<Float>>.size, index: 0)
-
-                let indexOffset = Int(sub.beginIndex) * Int(model.indexElementSize)
-                encoder.drawIndexedPrimitives(
-                    type: .triangle,
-                    indexCount: Int(sub.vertexCount),
-                    indexType: indexType,
-                    indexBuffer: indexBuffer,
-                    indexBufferOffset: indexOffset
-                )
-            }
-
-            // ── Main pass ──
             encoder.setRenderPipelineState(pipelineState)
-            encoder.setCullMode(.none)
             encoder.setVertexBuffer(vertexBuffer, offset: 0, index: 0)
             encoder.setVertexBytes(&uniforms, length: MemoryLayout<MMDUniforms>.size, index: 1)
             encoder.setFragmentBytes(&uniforms, length: MemoryLayout<MMDUniforms>.size, index: 1)
             encoder.setFragmentSamplerState(samplerState, index: 0)
 
-            // Opaque submeshes
+            // Pass 1: opaque submeshes (non-PNG), depth write ON
             encoder.setDepthStencilState(depthStateWrite)
             for sub in subMeshes {
                 let matID = Int(sub.materialID)
@@ -295,7 +263,7 @@ class MetalMMDRenderer: NSObject, MTKViewDelegate {
                 drawSubMesh(encoder: encoder, sub: sub, mat: mat, model: model, indexBuffer: indexBuffer)
             }
 
-            // Transparent submeshes (PNG)
+            // Pass 2: transparent submeshes (PNG), depth write OFF, alpha blended
             encoder.setDepthStencilState(depthStateNoWrite)
             for sub in subMeshes {
                 let matID = Int(sub.materialID)
