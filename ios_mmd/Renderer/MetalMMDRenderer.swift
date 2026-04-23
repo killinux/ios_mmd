@@ -263,7 +263,7 @@ class MetalMMDRenderer: NSObject, MTKViewDelegate {
                 if texPath.hasSuffix(".png") { continue }
 
                 var edgeSize = mat.edgeSize * 0.01
-                var edgeColor = SIMD4<Float>(0.15, 0.1, 0.1, 1.0)
+                var edgeColor = SIMD4<Float>(0.0, 0.0, 0.0, 1.0)
                 encoder.setVertexBytes(&edgeSize, length: MemoryLayout<Float>.size, index: 2)
                 encoder.setFragmentBytes(&edgeColor, length: MemoryLayout<SIMD4<Float>>.size, index: 0)
 
