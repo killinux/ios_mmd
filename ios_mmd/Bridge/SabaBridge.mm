@@ -194,6 +194,11 @@
         mi.ambientG = mats[i].m_ambient.y;
         mi.ambientB = mats[i].m_ambient.z;
         mi.edgeSize = mats[i].m_edgeSize;
+        mi.edgeColorR = mats[i].m_edgeColor.r;
+        mi.edgeColorG = mats[i].m_edgeColor.g;
+        mi.edgeColorB = mats[i].m_edgeColor.b;
+        mi.edgeColorA = mats[i].m_edgeColor.a;
+        mi.bothFace = mats[i].m_bothFace;
 
         std::string texPath = mats[i].m_texture;
         if (!texPath.empty()) {
@@ -201,6 +206,14 @@
         } else {
             mi.texturePath = @"";
         }
+
+        std::string spTexPath = mats[i].m_spTexture;
+        if (!spTexPath.empty()) {
+            mi.sphereTexturePath = [NSString stringWithUTF8String:spTexPath.c_str()];
+        } else {
+            mi.sphereTexturePath = @"";
+        }
+        mi.sphereTextureMode = (int)mats[i].m_spTextureMode;
 
         [result addObject:mi];
     }

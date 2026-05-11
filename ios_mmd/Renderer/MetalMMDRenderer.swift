@@ -8,6 +8,7 @@ class MetalMMDRenderer: NSObject, MTKViewDelegate {
     let camera = Camera()
 
     private var pipelineState: MTLRenderPipelineState!
+    private var outlinePipelineState: MTLRenderPipelineState!
     private var depthStateWrite: MTLDepthStencilState!
     private var depthStateNoWrite: MTLDepthStencilState!
     private var samplerState: MTLSamplerState!
@@ -21,6 +22,7 @@ class MetalMMDRenderer: NSObject, MTKViewDelegate {
     private var subMeshes: [SabaSubMesh] = []
     private var materialInfos: [SabaMaterialInfo] = []
     private var textures: [Int: MTLTexture] = [:]
+    private var sphereTextures: [Int: MTLTexture] = [:]
 
     private var viewportSize: CGSize = CGSize(width: 1, height: 1)
     private var lastFrameTime: CFTimeInterval = 0
@@ -83,6 +85,24 @@ class MetalMMDRenderer: NSObject, MTKViewDelegate {
             pipelineState = try device.makeRenderPipelineState(descriptor: mainDesc)
         } catch {
             fatalError("Failed to create pipeline state: \(error)")
+        }
+
+        let outlineDesc = MTLRenderPipelineDescriptor()
+        outlineDesc.vertexFunction = library.makeFunction(name: "outline_vertex")
+        outlineDesc.fragmentFunction = library.makeFunction(name: "outline_fragment")
+        outlineDesc.colorAttachments[0].pixelFormat = mtkView.colorPixelFormat
+        outlineDesc.depthAttachmentPixelFormat = mtkView.depthStencilPixelFormat
+        outlineDesc.sampleCount = mtkView.sampleCount
+        outlineDesc.colorAttachments[0].isBlendingEnabled = true
+        outlineDesc.colorAttachments[0].sourceRGBBlendFactor = .sourceAlpha
+        outlineDesc.colorAttachments[0].destinationRGBBlendFactor = .oneMinusSourceAlpha
+        outlineDesc.colorAttachments[0].sourceAlphaBlendFactor = .one
+        outlineDesc.colorAttachments[0].destinationAlphaBlendFactor = .oneMinusSourceAlpha
+
+        do {
+            outlinePipelineState = try device.makeRenderPipelineState(descriptor: outlineDesc)
+        } catch {
+            fatalError("Failed to create outline pipeline state: \(error)")
         }
     }
 
@@ -157,6 +177,7 @@ class MetalMMDRenderer: NSObject, MTKViewDelegate {
 
     private func loadTextures(modelDir: String) {
         textures.removeAll()
+        sphereTextures.removeAll()
         let loader = MTKTextureLoader(device: device)
         let options: [MTKTextureLoader.Option: Any] = [
             .textureUsage: MTLTextureUsage.shaderRead.rawValue,
@@ -166,21 +187,22 @@ class MetalMMDRenderer: NSObject, MTKViewDelegate {
 
         for (i, mat) in materialInfos.enumerated() {
             let texPath = mat.texturePath ?? ""
-            if texPath.isEmpty { continue }
-
-            let fullPath: String
-            if (texPath as NSString).isAbsolutePath {
-                fullPath = texPath
-            } else {
-                fullPath = (modelDir as NSString).appendingPathComponent(texPath)
+            if !texPath.isEmpty {
+                let fullPath = (texPath as NSString).isAbsolutePath ? texPath : (modelDir as NSString).appendingPathComponent(texPath)
+                if let tex = try? loader.newTexture(URL: URL(fileURLWithPath: fullPath), options: options) {
+                    textures[i] = tex
+                } else {
+                    print("[MMD] Warning: texture \(texPath) load failed")
+                }
             }
 
-            let url = URL(fileURLWithPath: fullPath)
-            do {
-                let tex = try loader.newTexture(URL: url, options: options)
-                textures[i] = tex
-            } catch {
-                print("[MMD] Warning: texture \(texPath): \(error.localizedDescription)")
+            let spPath = mat.sphereTexturePath ?? ""
+            if !spPath.isEmpty && mat.sphereTextureMode != 0 {
+                let fullSpPath = (spPath as NSString).isAbsolutePath ? spPath : (modelDir as NSString).appendingPathComponent(spPath)
+                if let spTex = try? loader.newTexture(URL: URL(fileURLWithPath: fullSpPath), options: options) {
+                    sphereTextures[i] = spTex
+                    print("[MMD] Sphere texture loaded: \(spPath) mode=\(mat.sphereTextureMode)")
+                }
             }
         }
     }
@@ -265,6 +287,28 @@ class MetalMMDRenderer: NSObject, MTKViewDelegate {
 
             var scene = buildSceneUniforms()
 
+            // ── Outline pass (back-face extrusion, no depth write) ──
+            encoder.setRenderPipelineState(outlinePipelineState)
+            encoder.setDepthStencilState(depthStateNoWrite)
+            encoder.setCullMode(.front)
+            encoder.setVertexBuffer(vertexBuffer, offset: 0, index: 0)
+            encoder.setVertexBytes(&scene, length: MemoryLayout<MMDSceneUniforms>.size, index: 1)
+            for sub in subMeshes {
+                let matID = Int(sub.materialID)
+                guard matID >= 0 && matID < materialInfos.count else { continue }
+                let mat = materialInfos[matID]
+                if mat.edgeSize <= 0 { continue }
+                var outline = MMDOutlineUniforms(
+                    edgeColor: SIMD4<Float>(mat.edgeColorR, mat.edgeColorG, mat.edgeColorB, mat.edgeColorA),
+                    diffuseColor: SIMD3<Float>(mat.diffuseR, mat.diffuseG, mat.diffuseB),
+                    edgeSize: mat.edgeSize
+                )
+                encoder.setVertexBytes(&outline, length: MemoryLayout<MMDOutlineUniforms>.size, index: 2)
+                encoder.setFragmentBytes(&outline, length: MemoryLayout<MMDOutlineUniforms>.size, index: 0)
+                let indexOffset = Int(sub.beginIndex) * Int(model.indexElementSize)
+                encoder.drawIndexedPrimitives(type: .triangle, indexCount: Int(sub.vertexCount), indexType: indexType, indexBuffer: indexBuffer, indexBufferOffset: indexOffset)
+            }
+
             // ── Main pass ──
             encoder.setRenderPipelineState(pipelineState)
             encoder.setCullMode(.none)
@@ -285,6 +329,7 @@ class MetalMMDRenderer: NSObject, MTKViewDelegate {
 
             // Transparent submeshes (PNG)
             encoder.setDepthStencilState(depthStateNoWrite)
+            encoder.setCullMode(.none)
             for sub in subMeshes {
                 let matID = Int(sub.materialID)
                 guard let mat = (matID >= 0 && matID < materialInfos.count) ? materialInfos[matID] : nil else { continue }
@@ -303,10 +348,9 @@ class MetalMMDRenderer: NSObject, MTKViewDelegate {
     private func drawSubMesh(encoder: MTLRenderCommandEncoder, sub: SabaSubMesh, mat: SabaMaterialInfo, model: SabaMMDModel, indexBuffer: MTLBuffer) {
         let matID = Int(sub.materialID)
         let hasTex = textures[matID] != nil
+        let hasSpTex = sphereTextures[matID] != nil
 
-        // Convert MMD specularPower to PBR roughness
         let roughness = Float(1.0 - min(mat.specularPower / 100.0, 1.0))
-        // Estimate metallic from specular intensity
         let specAvg = (mat.specularR + mat.specularG + mat.specularB) / 3.0
         let metallic: Float = specAvg > 0.5 ? 0.3 : 0.0
 
@@ -318,12 +362,13 @@ class MetalMMDRenderer: NSObject, MTKViewDelegate {
             hasTexture: hasTex ? 1 : 0,
             roughness: roughness,
             metallic: metallic,
-            _pad0: 0,
-            _pad1: 0
+            hasSphereTexture: hasSpTex ? 1 : 0,
+            sphereTextureMode: mat.sphereTextureMode
         )
 
         encoder.setFragmentBytes(&matUniforms, length: MemoryLayout<MMDMaterialUniforms>.size, index: 0)
         encoder.setFragmentTexture(hasTex ? textures[matID] : dummyTexture, index: 0)
+        encoder.setFragmentTexture(hasSpTex ? sphereTextures[matID] : dummyTexture, index: 1)
 
         let indexOffset = Int(sub.beginIndex) * Int(model.indexElementSize)
         encoder.drawIndexedPrimitives(

@@ -91,6 +91,7 @@ fragment float4 mmd_fragment(VertexOut in                          [[stage_in]],
                              constant MMDMaterialUniforms &mat     [[buffer(0)]],
                              constant MMDSceneUniforms &scene      [[buffer(1)]],
                              texture2d<float> tex                  [[texture(0)]],
+                             texture2d<float> sphereTex            [[texture(1)]],
                              sampler texSampler                    [[sampler(0)]])
 {
     float3 N = normalize(in.worldNormal);
@@ -104,6 +105,18 @@ fragment float4 mmd_fragment(VertexOut in                          [[stage_in]],
     }
     float3 albedo = mat.diffuse.rgb * texColor.rgb;
     float alpha   = mat.diffuse.a * texColor.a;
+
+    // Sphere Map (MatCap)
+    if (mat.hasSphereTexture) {
+        float3 viewNormal = normalize((scene.viewMatrix * float4(N, 0.0)).xyz);
+        float2 spUV = viewNormal.xy * 0.5 + 0.5;
+        float4 spColor = sphereTex.sample(texSampler, spUV);
+        if (mat.sphereTextureMode == 1) {       // Mul
+            albedo *= spColor.rgb;
+        } else if (mat.sphereTextureMode == 2) { // Add
+            albedo += spColor.rgb;
+        }
+    }
 
     // PBR parameters
     float roughness = clamp(mat.roughness, 0.04, 1.0);
@@ -147,12 +160,46 @@ fragment float4 mmd_fragment(VertexOut in                          [[stage_in]],
     float3 envBRDF  = F_ibl * (1.0 - roughness * 0.7);
     float3 iblSpecular = prefilteredEnv * envBRDF;
 
+    // ── Rim Light ──
+    float rim = 1.0 - max(dot(N, V), 0.0);
+    rim = pow(rim, 3.0);
+    float3 rimColor = float3(1.0, 0.95, 0.9) * 0.25 * rim * max(NdotL, 0.2);
+
     // ── Combine ──
     float3 ambient = (iblDiffuse + iblSpecular) * scene.ambientIntensity;
-    float3 color   = directLight + ambient;
+    float3 color   = directLight + ambient + rimColor;
 
     // ACES tone mapping
     color = ACESFilm(color);
 
     return float4(color, alpha);
+}
+
+// ── Outline pass ──
+
+vertex float4 outline_vertex(const device MMDVertex *vertices   [[buffer(0)]],
+                             constant MMDSceneUniforms &scene    [[buffer(1)]],
+                             constant MMDOutlineUniforms &outline [[buffer(2)]],
+                             uint vid                            [[vertex_id]])
+{
+    float3 pos  = float3(vertices[vid].position);
+    float3 norm = float3(vertices[vid].normal);
+
+    float4 worldPos  = scene.modelMatrix * float4(pos, 1.0);
+    float3 worldNorm = normalize((scene.modelMatrix * float4(norm, 0.0)).xyz);
+
+    float4 clipPos = scene.projectionMatrix * scene.viewMatrix * worldPos;
+    float3 clipNorm = (scene.projectionMatrix * scene.viewMatrix * float4(worldNorm, 0.0)).xyz;
+    float2 offset = normalize(clipNorm.xy);
+
+    clipPos.xy += offset * outline.edgeSize * clipPos.w * 0.002;
+    return clipPos;
+}
+
+fragment float4 outline_fragment(float4 pos [[stage_in]],
+                                 constant MMDOutlineUniforms &outline [[buffer(0)]])
+{
+    float3 tinted = outline.diffuseColor * 0.35;
+    float3 color = mix(tinted, outline.edgeColor.rgb, 0.3);
+    return float4(color, outline.edgeColor.a);
 }

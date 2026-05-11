@@ -41,8 +41,14 @@ struct MMDMaterialUniforms {
     int hasTexture;
     float roughness;
     float metallic;
-    float _pad0;
-    float _pad1;
+    int hasSphereTexture;
+    int sphereTextureMode; // 0=None, 1=Mul, 2=Add
+};
+
+struct MMDOutlineUniforms {
+    simd_float4 edgeColor;
+    simd_float3 diffuseColor;
+    float edgeSize;
 };
 
 #endif

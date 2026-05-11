@@ -14,6 +14,10 @@ NS_ASSUME_NONNULL_BEGIN
 @property (nonatomic) float ambientR, ambientG, ambientB;
 @property (nonatomic, copy) NSString *texturePath;
 @property (nonatomic) float edgeSize;
+@property (nonatomic) float edgeColorR, edgeColorG, edgeColorB, edgeColorA;
+@property (nonatomic, copy) NSString *sphereTexturePath;
+@property (nonatomic) int sphereTextureMode; // 0=None, 1=Mul, 2=Add
+@property (nonatomic) BOOL bothFace;
 @end
 
 NS_ASSUME_NONNULL_END
