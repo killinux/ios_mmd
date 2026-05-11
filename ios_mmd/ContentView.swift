@@ -102,12 +102,23 @@ struct ContentView: View {
     }
 
     func findBundledFiles() {
-        bundledModels = Bundle.main.paths(forResourcesOfType: "pmx", inDirectory: nil)
-            .map { (name: ($0 as NSString).lastPathComponent, path: $0) }
-            .sorted { $0.name < $1.name }
-        bundledVMDs = Bundle.main.paths(forResourcesOfType: "vmd", inDirectory: nil)
-            .map { (name: ($0 as NSString).lastPathComponent, path: $0) }
-            .sorted { $0.name < $1.name }
+        var models: [(name: String, path: String)] = []
+        var vmds: [(name: String, path: String)] = []
+        let fm = FileManager.default
+        if let enumerator = fm.enumerator(at: Bundle.main.bundleURL, includingPropertiesForKeys: nil, options: .skipsHiddenFiles) {
+            while let url = enumerator.nextObject() as? URL {
+                switch url.pathExtension.lowercased() {
+                case "pmx":
+                    models.append((name: url.lastPathComponent, path: url.path))
+                case "vmd":
+                    vmds.append((name: url.lastPathComponent, path: url.path))
+                default:
+                    break
+                }
+            }
+        }
+        bundledModels = models.sorted { $0.name < $1.name }
+        bundledVMDs = vmds.sorted { $0.name < $1.name }
     }
 
     func loadModel(name: String, path: String) {

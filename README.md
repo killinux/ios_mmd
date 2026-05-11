@@ -2,6 +2,54 @@
 
 加载 PMX 模型，播放 VMD 动作的 iOS App。
 
+## 快速开始
+
+本项目分为两个仓库：
+
+| 仓库 | 内容 | 大小 |
+|------|------|------|
+| [ios_mmd](https://github.com/killinux/ios_mmd) | 源码（Swift、ObjC++、Metal shader） | ~1MB |
+| [ios_mmd_third](https://github.com/killinux/ios_mmd_third) | 第三方库 + PMX 模型 + VMD 动作 | ~130MB |
+
+### 方法一：一键安装（推荐）
+
+```bash
+git clone git@github.com:killinux/ios_mmd.git
+cd ios_mmd
+git clone git@github.com:killinux/ios_mmd_third.git _third
+bash _third/setup.sh
+rm -rf _third
+open ios_mmd.xcodeproj
+```
+
+### 方法二：手动复制
+
+```bash
+git clone git@github.com:killinux/ios_mmd.git
+git clone git@github.com:killinux/ios_mmd_third.git
+
+cp -R ios_mmd_third/Libraries/ ios_mmd/Libraries/
+cp -R "ios_mmd_third/Purifier Inase 18" ios_mmd/
+cp -R "ios_mmd_third/Reika Shimohira 2 18" ios_mmd/
+cp -R ios_mmd_third/ios_mmd/SabaLib/ ios_mmd/ios_mmd/SabaLib/
+mkdir -p ios_mmd/ios_mmd/Resources
+cp ios_mmd_third/ios_mmd/Resources/* ios_mmd/ios_mmd/Resources/
+cp -R ios_mmd_third/vmd_yaoxiang/ ios_mmd/vmd_yaoxiang/
+
+open ios_mmd/ios_mmd.xcodeproj
+```
+
+### 第三方依赖说明
+
+| 目录 | 库 | 用途 |
+|------|------|------|
+| Libraries/saba | [benikabocha/saba](https://github.com/benikabocha/saba) | MMD 模型解析 + 动画 |
+| Libraries/glm | [g-truc/glm](https://github.com/g-truc/glm) | OpenGL 数学库 (header-only) |
+| Libraries/bullet3 | [bulletphysics/bullet3](https://github.com/bulletphysics/bullet3) | 物理引擎（头发/裙子） |
+| Purifier Inase 18 | PMX 模型 | 3 个版本 (None/V1/V2) + 贴图 |
+| Reika Shimohira 2 18 | PMX 模型 | 3 个版本 (None/V1/V2) + 贴图 |
+
+
 ## 架构设计
 
 ```
