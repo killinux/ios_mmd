@@ -9,12 +9,16 @@
 /* Begin PBXBuildFile section */
 		AA0000032F98A8DA00426504 /* Purifier Inase 18 in Resources */ = {isa = PBXBuildFile; fileRef = AA0000012F98A8DA00426504 /* Purifier Inase 18 */; };
 		AA0000042F98A8DA00426504 /* Reika Shimohira 2 18 in Resources */ = {isa = PBXBuildFile; fileRef = AA0000022F98A8DA00426504 /* Reika Shimohira 2 18 */; };
+		AA0000062F98A8DA00426504 /* Cartilla White Rose 18 children in Resources */ = {isa = PBXBuildFile; fileRef = AA0000052F98A8DA00426504 /* Cartilla White Rose 18 children */; };
+		AA0000082F98A8DA00426504 /* Reika 18 children in Resources */ = {isa = PBXBuildFile; fileRef = AA0000072F98A8DA00426504 /* Reika 18 children */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
 		2B4A0DFF2F98A8DA00426504 /* ios_mmd.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = ios_mmd.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		AA0000012F98A8DA00426504 /* Purifier Inase 18 */ = {isa = PBXFileReference; lastKnownFileType = folder; path = "Purifier Inase 18"; sourceTree = "<group>"; };
 		AA0000022F98A8DA00426504 /* Reika Shimohira 2 18 */ = {isa = PBXFileReference; lastKnownFileType = folder; path = "Reika Shimohira 2 18"; sourceTree = "<group>"; };
+		AA0000052F98A8DA00426504 /* Cartilla White Rose 18 children */ = {isa = PBXFileReference; lastKnownFileType = folder; path = "Cartilla White Rose 18 children"; sourceTree = "<group>"; };
+		AA0000072F98A8DA00426504 /* Reika 18 children */ = {isa = PBXFileReference; lastKnownFileType = folder; path = "Reika 18 children"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -42,6 +46,8 @@
 				2B4A0E012F98A8DA00426504 /* ios_mmd */,
 				AA0000012F98A8DA00426504 /* Purifier Inase 18 */,
 				AA0000022F98A8DA00426504 /* Reika Shimohira 2 18 */,
+				AA0000052F98A8DA00426504 /* Cartilla White Rose 18 children */,
+				AA0000072F98A8DA00426504 /* Reika 18 children */,
 				2B4A0E002F98A8DA00426504 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -120,6 +126,8 @@
 			files = (
 				AA0000032F98A8DA00426504 /* Purifier Inase 18 in Resources */,
 				AA0000042F98A8DA00426504 /* Reika Shimohira 2 18 in Resources */,
+				AA0000062F98A8DA00426504 /* Cartilla White Rose 18 children in Resources */,
+				AA0000082F98A8DA00426504 /* Reika 18 children in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
